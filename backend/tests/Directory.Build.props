@@ -1,0 +1,32 @@
+<Project>
+
+  <!--
+    MSBuild stops at the first Directory.Build.props it finds walking upward,
+    so this file must import the solution-level one explicitly. Without that
+    import, test projects would silently lose the target framework, nullable
+    settings, and the NuGet audit configuration.
+  -->
+  <Import Project="../Directory.Build.props" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!--
+      Warnings stay errors in test code: a test that does not compile cleanly
+      is as much of a problem as production code that does not. These two
+      rules are suppressed because they are about library API design and do
+      not apply to xunit test classes.
+
+      CA1707  Underscores in member names. Test names here read as sentences
+              (Day_31_falls_back_to_the_last_day_of_a_short_month), which is
+              exactly what makes a failing test report legible. Renaming them
+              to PascalCase would trade a real benefit for a convention that
+              exists to keep PUBLIC APIs consistent.
+      CA1861  Prefer a static readonly array over a constant array argument.
+              InlineData attributes are inherently per-case literals.
+    -->
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA1711</NoWarn>
+  </PropertyGroup>
+
+</Project>

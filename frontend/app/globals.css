@@ -1,0 +1,765 @@
+@import "tailwindcss";
+
+/*
+ * =============================================================================
+ * Design system
+ *
+ * The brief: a calm, dense, professional product for people who do this work
+ * all day. QuickBooks is the reference point, and what actually makes that
+ * family of interfaces feel solid is not its colour. It is:
+ *
+ *   * A real typeface with tight metrics, used at a few deliberate sizes.
+ *   * Generous vertical rhythm inside rows, tight horizontal padding.
+ *   * Hairline borders instead of shadows, except where something floats.
+ *   * Numbers in tabular figures, right-aligned, so columns scan.
+ *   * Colour used sparingly, and almost never for decoration.
+ *
+ * So the investment here is in type, spacing, and restraint rather than in
+ * gradients and rounded cards.
+ *
+ * -----------------------------------------------------------------------------
+ * Contrast
+ *
+ * Section 5 supplies a palette and asks that contrast be verified before
+ * finalising it. It was, and two tokens failed WCAG 2.2 AA for body text
+ * against the off-white page:
+ *
+ *   token               on #FFFFFF   on page bg   AA body (4.5:1)
+ *   ------------------------------------------------------------
+ *   #172033 ink            16.27        15.31     pass
+ *   #667085 secondary       4.97         4.68     pass
+ *   #3157D5 accent          6.08         5.72     pass
+ *   #16865B success         4.57         4.30     FAIL on the page
+ *   #B7791F warning         3.64         3.43     FAIL on both
+ *   #C0393A danger          5.40         5.08     pass
+ *
+ * Rather than abandon the brand colours, each of those two is split: the
+ * original is kept for fills, borders, icons and chart marks, where 3:1 is the
+ * relevant threshold and both clear it comfortably; a darkened variant is used
+ * wherever the colour is read as text. White on amber is 3.64:1 and is
+ * therefore never used, so amber chips are a light tint with dark text.
+ * =============================================================================
+ */
+
+@theme {
+  /* --- Type -------------------------------------------------------------- */
+  /* Inter, self-hosted by next/font. Its tall x-height and narrow apertures
+     hold up at 13px in a dense table, which is most of this interface, and it
+     has true tabular figures. The stack behind it degrades to the platform UI
+     font rather than to Times. */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    var(--font-jetbrains), ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+  /* --- Surfaces ---------------------------------------------------------- */
+  /* A very slightly cool off-white, so white panels read as raised without
+     needing a shadow to say so. */
+  --color-page: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #fafbfc;
+  --color-surface-sunken: #f1f3f6;
+
+  /* --- Text -------------------------------------------------------------- */
+  --color-ink: #141c2b;
+  --color-ink-secondary: #5c6678;
+  /* Placeholders and disabled controls only. Below AA deliberately: a
+     placeholder that competes with a real value is a usability problem. */
+  --color-ink-muted: #949db0;
+
+  /* --- Lines ------------------------------------------------------------- */
+  --color-line: #e5e8ee;
+  --color-line-strong: #d0d6e0;
+
+  /* --- The sidebar ------------------------------------------------------- */
+  /* Dark, against a light page. The navigation is not content: it is the
+     frame the content sits in, and giving it its own ground is what stops the
+     panel and the page reading as one undifferentiated white sheet with a
+     hairline down it.
+
+     The hue is the same cool navy as --color-ink rather than a neutral grey,
+     so the panel belongs to the same palette as the text it sits beside. */
+  --color-sidebar: #151c2a;
+  --color-sidebar-line: #262f40;
+  /* Inactive items. 6.6:1 on the panel, so it clears AA as body text rather
+     than relying on being "navigation, which people hunt for anyway". */
+  --color-sidebar-ink: #9aa4b6;
+  --color-sidebar-ink-strong: #ffffff;
+  /* Hover, and the current page. The active fill leans indigo so the accent
+     is present in the frame without a separate marker bar. */
+  --color-sidebar-hover: #1f2838;
+  --color-sidebar-active: #243150;
+
+  /* --- Brand accent ------------------------------------------------------ */
+  /* Indigo, per section 5: "one restrained brand accent, such as deep navy,
+     indigo, or muted blue", with green reserved for success and active states.
+     Changing the primary to QuickBooks green would read as "paid/successful"
+     on every button in the product, which is precisely what that rule exists
+     to prevent. The polish comes from type and spacing instead. */
+  --color-accent: #2f52c8;
+  --color-accent-hover: #2745a8;
+  --color-accent-active: #1f3a8f;
+  --color-accent-tint: #eef2fe;
+  --color-accent-tint-strong: #dde5fd;
+
+  /* --- Status ------------------------------------------------------------ */
+  --color-success: #16865b;
+  --color-success-text: #11704b;
+  --color-success-tint: #e7f5ef;
+
+  --color-warning: #b7791f;
+  --color-warning-text: #85570f;
+  --color-warning-tint: #fdf4e3;
+
+  --color-danger: #c0393a;
+  --color-danger-text: #ab2f30;
+  --color-danger-hover: #a32f30;
+  --color-danger-tint: #fdecec;
+
+  /* --- Priority, for the maintenance board ------------------------------- */
+  /* Distinct hues so three priorities are separable at a glance, each paired
+     with a word on the chip so colour is never the only signal. */
+  --color-priority-urgent: #b3261e;
+  --color-priority-urgent-tint: #fdeceb;
+  --color-priority-high: #b7791f;
+  --color-priority-high-tint: #fdf4e3;
+  --color-priority-medium: #2f52c8;
+  --color-priority-medium-tint: #eef2fe;
+  --color-priority-low: #5c6678;
+  --color-priority-low-tint: #f1f3f6;
+
+  /* --- Geometry ---------------------------------------------------------- */
+  /* Two radii, used everywhere. Section 5 warns against overly rounded
+     controls; 6px reads as considered, 10px as a surface rather than a pill. */
+  --radius-control: 6px;
+  --radius-surface: 10px;
+
+  --spacing-sidebar: 252px;
+  /* The collapsed rail. 60px is arithmetic, not taste: it is the width at
+     which a centred icon lands exactly where the expanded sidebar already
+     puts it, so collapsing moves the panel and nothing inside it. The
+     derivation is with the transition rules at the foot of this file. */
+  --spacing-sidebar-rail: 60px;
+
+  /* --- Elevation --------------------------------------------------------- */
+  /* Two levels only. A border does the work at rest; a shadow means something
+     genuinely floats. The two-layer form gives a contact shadow plus ambient
+     spread, which is what stops a dropdown looking like a flat grey box. */
+  --shadow-raised:
+    0 1px 2px rgb(20 28 43 / 0.04), 0 1px 3px rgb(20 28 43 / 0.06);
+  --shadow-floating:
+    0 2px 4px rgb(20 28 43 / 0.04), 0 12px 28px -6px rgb(20 28 43 / 0.16);
+  --shadow-dragging:
+    0 4px 8px rgb(20 28 43 / 0.08), 0 20px 40px -8px rgb(20 28 43 / 0.22);
+}
+
+/*
+ * -----------------------------------------------------------------------------
+ * Base
+ * -----------------------------------------------------------------------------
+ */
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    /* 15px. 16px pushes useful table rows below the fold on a laptop; 14px
+       starts to read as a spreadsheet rather than a document. */
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* Inter's contextual alternates and its disambiguation set. `cv05` gives
+       the single-storey l a tail, which separates 1, l and I in a column of
+       unit numbers where the difference actually matters. */
+    font-feature-settings: "cv05" 1, "cv11" 1, "ss01" 1, "calt" 1;
+  }
+
+  /* Headings: tightened tracking, because Inter at a large size is loose by
+     default and the difference is most of what makes a heading look designed. */
+  h1 {
+    font-size: 1.3125rem;
+    line-height: 1.25;
+    font-weight: 650;
+    letter-spacing: -0.019em;
+  }
+
+  h2 {
+    font-size: 1rem;
+    line-height: 1.35;
+    font-weight: 600;
+    letter-spacing: -0.013em;
+  }
+
+  h3 {
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    font-weight: 600;
+    letter-spacing: -0.009em;
+  }
+
+  /* Tabular figures wherever a number sits above or below another number.
+     Without this a column of rents jitters, because proportional digits have
+     different widths, and scanning for an outlier gets measurably harder. */
+  table,
+  .tabular,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "cv05" 1;
+  }
+
+  /*
+   * Focus. :focus-visible, so a mouse click leaves no ring but a keyboard user
+   * always knows where they are. The ring is offset to read as a halo rather
+   * than redrawing the control's own border.
+   */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Never remove an outline without replacing it. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Form controls inherit the typeface. Without this, a select falls back to
+     the platform font and sits visibly apart from its own label. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::placeholder {
+    color: var(--color-ink-muted);
+  }
+
+  /* A slim scrollbar on the board columns, so a horizontal scroll region does
+     not lose 15px of height to chrome. */
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--color-line-strong);
+    border-radius: 999px;
+  }
+
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /*
+   * Reduced motion. Durations go to effectively nothing rather than to zero:
+   * 0.01ms still fires transitionend, so any logic waiting on it keeps working.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/*
+ * -----------------------------------------------------------------------------
+ * Components
+ *
+ * Deliberately few. Section 5 warns against inconsistent spacing and
+ * purposeless cards, and the way that creeps in is ad-hoc utility strings per
+ * page. These are the shared shapes; a page composes them.
+ * -----------------------------------------------------------------------------
+ */
+
+@layer components {
+  .surface {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-surface);
+    box-shadow: var(--shadow-raised);
+  }
+
+  .floating {
+    box-shadow: var(--shadow-floating);
+  }
+
+  /* An eyebrow label: the small, wide-tracked, upper-case caption above a
+     group. One of the cheapest ways to add hierarchy without another size. */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    color: var(--color-ink-secondary);
+  }
+
+  /* A card being dragged. Lifted and very slightly tilted, because a card that
+     only gains a shadow still reads as part of the list; the rotation is what
+     makes it read as held. */
+  .card-dragging {
+    box-shadow: var(--shadow-dragging);
+    transform: rotate(1.5deg) scale(1.02);
+    cursor: grabbing;
+  }
+
+  /* The gap a dragged card leaves behind. A dashed outline rather than a solid
+     block, so it reads as a destination and not as another card. */
+  .drop-placeholder {
+    border: 1.5px dashed var(--color-line-strong);
+    border-radius: var(--radius-control);
+    background-color: var(--color-surface-sunken);
+  }
+
+  /* A board column that is the current drop target. */
+  .column-active {
+    background-color: var(--color-accent-tint);
+    outline: 2px solid var(--color-accent-tint-strong);
+    outline-offset: -2px;
+  }
+}
+
+/*
+ * Visually-hidden text uses Tailwind's own `sr-only`, not a local copy. It is
+ * already correct, clipped rather than display:none so assistive technology
+ * still reads it, and a second implementation would eventually diverge.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Motion                                                                      */
+/*                                                                             */
+/* Two keyframes, used by the dialogs. Both are short and small: an entrance   */
+/* that travels far or lasts long stops reading as "this arrived" and starts   */
+/* reading as "this is slow". The reduced-motion block above collapses both    */
+/* to effectively nothing, so nothing here needs its own guard.                */
+/* -------------------------------------------------------------------------- */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    /* Eight pixels and a hair of scale. Enough to register as movement,
+       little enough that it never looks like the panel is flying in. */
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/*
+ * Rows and cards that respond to the pointer. Collected here so every list in
+ * the application settles at the same speed; a table that highlights instantly
+ * next to one that eases looks like two different applications.
+ */
+@layer components {
+  .row-interactive {
+    transition:
+      background-color 150ms ease-out,
+      border-color 150ms ease-out;
+  }
+}
+
+/* The leaving halves of the two above. A dialog that fades in and then
+   vanishes reads as a glitch: the eye tracks the arrival and then loses the
+   object, so the reverse motion is what makes it feel dismissed rather than
+   lost. Both are short — an exit that takes as long as an entrance feels
+   like the interface arguing with the click. */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   A block that appears in place.
+   ---------------------------------------------------------------------------
+   Inline reveals — a confirmation bar, an error, an invitation link — are
+   mounted into a layout that is already settled, so they displace whatever is
+   below them. Appearing instantly makes that displacement read as the page
+   jolting; a short fade with a few pixels of travel reads as the block
+   arriving and pushing the rest down, which is what actually happened.
+
+   Shorter than the dialog animations on purpose. This is a part of the page
+   changing, not a new surface arriving over it.
+   ------------------------------------------------------------------------ */
+.reveal {
+  animation: reveal 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    animation: none;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A panel that arrives from the right edge. Paired with fade-in on the
+   backdrop behind it, which is what tells you the page underneath is no
+   longer the thing you are operating. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes drawer-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+
+/*
+ * -----------------------------------------------------------------------------
+ * The collapsible sidebar
+ *
+ * Driven by a data attribute on <html> rather than by React state, so the
+ * saved choice can be applied by a tiny inline script before first paint. The
+ * markup React renders is identical either way, so there is no hydration
+ * mismatch and no flash of a full-width sidebar on every navigation for
+ * somebody who collapsed it.
+ *
+ * Only the desktop sidebar carries [data-rail]. The mobile drawer is the same
+ * component, and a drawer that opens as a narrow strip of unlabelled icons
+ * would be useless, so it is deliberately out of scope here.
+ *
+ * WHY THE ICONS DO NOT MOVE
+ *   The rail is 60px for an arithmetic reason, not a visual one. The nav has
+ *   10px of padding and each link another 10px, so a 20px icon's left edge
+ *   sits 20px from the sidebar's edge. Centring that icon in a 60px rail puts
+ *   it at (60 - 20) / 2 = 20px — the same place. So collapsing changes the
+ *   width and nothing else: the icons are already where they are going.
+ *
+ *   The header badge is 32px against 14px of padding, which lands on the same
+ *   identity: (60 - 32) / 2 = 14.
+ *
+ *   An earlier version re-centred the icons with justify-content on collapse,
+ *   which had them sliding left while the panel shrank around them. Two
+ *   motions, in different directions, over the same 160ms.
+ * -----------------------------------------------------------------------------
+ */
+@media (min-width: 1024px) {
+  :root[data-sidebar="collapsed"] [data-rail] {
+    width: var(--spacing-sidebar-rail);
+  }
+
+  :root[data-sidebar="collapsed"] [data-rail-content] {
+    padding-left: var(--spacing-sidebar-rail);
+  }
+
+  /* Faded, not unmounted and not clipped to a pixel.
+     
+     Keeping the label in the layout is what stops the text re-wrapping as the
+     panel narrows: it simply slides out of view behind the panel's edge. It
+     also keeps it as the link's accessible name, so a screen reader still
+     reads "Properties" rather than announcing a bare graphic — opacity:0
+     content stays in the accessibility tree, where a clipped one is a guess. */
+  :root[data-sidebar="collapsed"] [data-rail] .nav-label,
+  :root[data-sidebar="collapsed"] [data-rail] .rail-hide {
+    opacity: 0;
+  }
+
+  /* The group captions go with them, but a rule between groups stays:
+     without some divider the rail is one undifferentiated column of icons.
+     Inset, because a line running the full width of a 60px strip reads as
+     the panel being cut in half rather than as a separator. */
+  :root[data-sidebar="collapsed"] [data-rail] .nav-group + .nav-group {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--color-sidebar-line);
+  }
+
+  :root[data-sidebar="collapsed"] [data-rail] .rail-rotate {
+    transform: rotate(180deg);
+  }
+}
+
+/* Nothing may reflow while the width changes. The panel clips horizontally and
+   every label is a single line, so narrowing the panel slides the text out of
+   sight instead of re-wrapping it one word at a time.
+
+   The nav needs the same rule, and that is not redundant. It is the element
+   with overflow-y: auto, and setting one axis to auto makes the other a
+   scroll container too — so once the rail narrows and the still-full-width
+   labels overhang it, the nav grows a horizontal scrollbar across the bottom
+   of the rail. Clipping the overflowing axis explicitly is what removes it. */
+[data-rail],
+[data-rail] nav {
+  overflow-x: hidden;
+}
+
+[data-rail] .nav-label,
+[data-rail] .rail-hide {
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A standard material-style ease, not the decelerating curve used for things
+     that arrive on screen. This is a panel resizing under the pointer, and the
+     entrance curve reads as rubbery when the thing it is applied to was
+     already there. */
+  [data-rail],
+  [data-rail-content] {
+    transition:
+      width 180ms cubic-bezier(0.4, 0, 0.2, 1),
+      padding-left 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* The labels lead on the way out and follow on the way in, which is what
+     makes the two read as one movement rather than two.
+     
+     Collapsing: they are gone in 90ms, so the panel closes on empty space
+     instead of guillotining the text. Expanding: they wait 80ms for the room
+     to exist, then fade up. Getting this wrong in either direction is most of
+     what made the old version feel broken — the labels vanished instantly and
+     the panel then took 160ms to catch up. */
+  [data-rail] .nav-label,
+  [data-rail] .rail-hide {
+    transition: opacity 140ms ease 80ms;
+  }
+
+  :root[data-sidebar="collapsed"] [data-rail] .nav-label,
+  :root[data-sidebar="collapsed"] [data-rail] .rail-hide {
+    transition: opacity 90ms ease;
+  }
+
+  [data-rail] .rail-rotate {
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* The scrollbar inside the dark panel. The light thumb is invisible on it. */
+.thin-scrollbar-dark {
+  scrollbar-color: var(--color-sidebar-line) transparent;
+}
+
+.thin-scrollbar-dark::-webkit-scrollbar-thumb {
+  background-color: var(--color-sidebar-line);
+}
+
+.thin-scrollbar-dark::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/*
+ * -----------------------------------------------------------------------------
+ * Dark mode
+ *
+ * Only the tokens change. Every surface, line and text colour in the
+ * application already comes from the @theme block above, so redefining those
+ * custom properties repaints the whole product without touching a component.
+ * Anything that needed a per-component dark variant would be a component that
+ * had hard-coded a colour, and that is worth finding rather than patching.
+ *
+ * THREE STATES, NOT TWO
+ *   "System" is the default and stamps nothing on the element, so the media
+ *   query decides. An explicit choice stamps data-theme, which has to win in
+ *   BOTH directions — hence the :not([data-theme="light"]) guard on the media
+ *   query, without which someone who chose Light on a machine set to dark
+ *   would get dark anyway.
+ *
+ * WHY THE VALUES ARE NOT THE LIGHT ONES INVERTED
+ *   Inverting lightness gives pure black panels and fully saturated accents,
+ *   both of which are harsher on a dark ground than on a light one. The
+ *   surfaces here are lifted off black so elevation still reads, and the
+ *   accent and status colours are lightened rather than kept, because the
+ *   light-mode values were chosen for contrast against white and fail against
+ *   a dark ground. Each text colour below clears 4.5:1 on the surface it sits
+ *   on; each tint is a low-alpha wash of its own hue rather than a fixed hex,
+ *   so it works on both the page and a raised panel.
+ * -----------------------------------------------------------------------------
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --color-page: #0e131c;
+    --color-surface: #151c28;
+    --color-surface-subtle: #1a2230;
+    --color-surface-sunken: #1f2836;
+
+    --color-ink: #e8ecf3;
+    --color-ink-secondary: #9aa4b6;
+    --color-ink-muted: #6b7687;
+
+    --color-line: #262f3e;
+    --color-line-strong: #384355;
+
+    /* The sidebar is already dark. It only needs to separate from a dark
+       page, so it goes slightly deeper rather than lighter. */
+    --color-sidebar: #0b1017;
+    --color-sidebar-line: #1f2836;
+    --color-sidebar-ink: #8b95a7;
+    --color-sidebar-ink-strong: #ffffff;
+    --color-sidebar-hover: #161d29;
+    --color-sidebar-active: #22304e;
+
+    /* Lightened: #2f52c8 is 2.6:1 on this page background. */
+    --color-accent: #6e8fff;
+    --color-accent-hover: #88a3ff;
+    --color-accent-active: #a3b8ff;
+    --color-accent-tint: #1a2440;
+    --color-accent-tint-strong: #22305a;
+
+    --color-success: #3fbd8a;
+    --color-success-text: #5bd0a0;
+    --color-success-tint: #122a22;
+
+    --color-warning: #d8a33f;
+    --color-warning-text: #e8bb63;
+    --color-warning-tint: #2a2112;
+
+    --color-danger: #e8686a;
+    --color-danger-text: #f08486;
+    --color-danger-hover: #f08486;
+    --color-danger-tint: #2d1618;
+
+    --color-priority-urgent: #e8686a;
+    --color-priority-urgent-tint: #2d1618;
+    --color-priority-high: #d8a33f;
+    --color-priority-high-tint: #2a2112;
+    --color-priority-medium: #6e8fff;
+    --color-priority-medium-tint: #1a2440;
+    --color-priority-low: #9aa4b6;
+    --color-priority-low-tint: #1f2836;
+
+    /* A shadow is a darker version of the ground, so on a dark ground it is
+       nearly invisible. These lean on opacity against black instead, and the
+       borders above do more of the work. */
+    --shadow-raised:
+      0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-floating:
+      0 2px 4px rgb(0 0 0 / 0.3), 0 12px 28px -6px rgb(0 0 0 / 0.6);
+    --shadow-dragging:
+      0 4px 8px rgb(0 0 0 / 0.4), 0 20px 40px -8px rgb(0 0 0 / 0.7);
+  }
+}
+/* The explicit choice. Identical values; it has to be a separate block
+   because a media query cannot be made to match on demand. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-page: #0e131c;
+  --color-surface: #151c28;
+  --color-surface-subtle: #1a2230;
+  --color-surface-sunken: #1f2836;
+
+  --color-ink: #e8ecf3;
+  --color-ink-secondary: #9aa4b6;
+  --color-ink-muted: #6b7687;
+
+  --color-line: #262f3e;
+  --color-line-strong: #384355;
+
+  --color-sidebar: #0b1017;
+  --color-sidebar-line: #1f2836;
+  --color-sidebar-ink: #8b95a7;
+  --color-sidebar-ink-strong: #ffffff;
+  --color-sidebar-hover: #161d29;
+  --color-sidebar-active: #22304e;
+
+  --color-accent: #6e8fff;
+  --color-accent-hover: #88a3ff;
+  --color-accent-active: #a3b8ff;
+  --color-accent-tint: #1a2440;
+  --color-accent-tint-strong: #22305a;
+
+  --color-success: #3fbd8a;
+  --color-success-text: #5bd0a0;
+  --color-success-tint: #122a22;
+
+  --color-warning: #d8a33f;
+  --color-warning-text: #e8bb63;
+  --color-warning-tint: #2a2112;
+
+  --color-danger: #e8686a;
+  --color-danger-text: #f08486;
+  --color-danger-hover: #f08486;
+  --color-danger-tint: #2d1618;
+
+  --color-priority-urgent: #e8686a;
+  --color-priority-urgent-tint: #2d1618;
+  --color-priority-high: #d8a33f;
+  --color-priority-high-tint: #2a2112;
+  --color-priority-medium: #6e8fff;
+  --color-priority-medium-tint: #1a2440;
+  --color-priority-low: #9aa4b6;
+  --color-priority-low-tint: #1f2836;
+
+  --shadow-raised:
+    0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.4);
+  --shadow-floating:
+    0 2px 4px rgb(0 0 0 / 0.3), 0 12px 28px -6px rgb(0 0 0 / 0.6);
+  --shadow-dragging:
+    0 4px 8px rgb(0 0 0 / 0.4), 0 20px 40px -8px rgb(0 0 0 / 0.7);
+}

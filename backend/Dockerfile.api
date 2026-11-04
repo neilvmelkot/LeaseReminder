@@ -1,0 +1,81 @@
+# =============================================================================
+# LeaseReminder API
+#
+# Multi-stage (section 8): the SDK compiles, a small runtime image ships. The
+# final image contains no compiler, no source, no NuGet cache, and runs as a
+# non-root user.
+#
+# Base images are pinned by digest as well as tag. A tag is mutable, so
+# "10.0" today and "10.0" next month can be different images; pinning the
+# digest means a rebuild of an old commit produces the same base it was
+# tested against. Update both together, deliberately.
+# =============================================================================
+
+# -- Build --------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+WORKDIR /src
+
+# Project files first, so the restore layer is cached until a dependency
+# actually changes. Copying everything up front would re-restore on every
+# source edit, which is the single biggest avoidable cost in a .NET build.
+COPY Directory.Build.props Directory.Packages.props LeaseReminder.sln ./
+COPY src/LeaseReminder.Domain/LeaseReminder.Domain.csproj src/LeaseReminder.Domain/
+COPY src/LeaseReminder.Application/LeaseReminder.Application.csproj src/LeaseReminder.Application/
+COPY src/LeaseReminder.Infrastructure/LeaseReminder.Infrastructure.csproj src/LeaseReminder.Infrastructure/
+COPY src/LeaseReminder.Api/LeaseReminder.Api.csproj src/LeaseReminder.Api/
+COPY src/LeaseReminder.Worker/LeaseReminder.Worker.csproj src/LeaseReminder.Worker/
+COPY tests/Directory.Build.props tests/
+COPY tests/LeaseReminder.UnitTests/LeaseReminder.UnitTests.csproj tests/LeaseReminder.UnitTests/
+COPY tests/LeaseReminder.IntegrationTests/LeaseReminder.IntegrationTests.csproj tests/LeaseReminder.IntegrationTests/
+
+RUN dotnet restore src/LeaseReminder.Api/LeaseReminder.Api.csproj
+
+COPY src/ src/
+
+# No secrets are passed as build arguments: a build argument is visible in the
+# image history, so anything passed here would be permanently readable by
+# anyone who can pull the image (section 8).
+RUN dotnet publish src/LeaseReminder.Api/LeaseReminder.Api.csproj \
+      --no-restore \
+      --configuration Release \
+      --output /app/publish \
+      /p:UseAppHost=false
+
+# -- Runtime ------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+
+# curl is needed for the container health check and nothing else. Installed
+# with --no-install-recommends and the apt lists removed, so the layer stays
+# small and carries no package index.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# A dedicated unprivileged user (section 4.H). The aspnet image ships an "app"
+# user, but it is created explicitly here so the UID is known and stable
+# rather than inherited from whatever the base image happens to use.
+RUN groupadd --system --gid 64001 leasereminder \
+    && useradd --system --uid 64001 --gid 64001 --no-create-home --shell /usr/sbin/nologin leasereminder
+
+WORKDIR /app
+
+COPY --from=build --chown=root:root --chmod=555 /app/publish ./
+
+ENV ASPNETCORE_ENVIRONMENT=Production \
+    ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+EXPOSE 8080
+
+USER 64001:64001
+
+# Liveness, not readiness: the platform should restart a wedged process, not a
+# healthy one whose database had a brief blip. See HealthEndpoints.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl --fail --silent --show-error http://localhost:8080/health/live || exit 1
+
+# dotnet as PID 1 receives SIGTERM directly, which is what lets ASP.NET Core
+# drain in-flight requests on a redeploy instead of being killed mid-response.
+ENTRYPOINT ["dotnet", "LeaseReminder.Api.dll"]

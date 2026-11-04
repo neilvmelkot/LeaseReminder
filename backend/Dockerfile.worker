@@ -1,0 +1,65 @@
+# =============================================================================
+# LeaseReminder background worker
+#
+# Same multi-stage shape as the API, with three differences that follow from
+# section 4.H:
+#
+#   * The runtime base is dotnet/runtime, not dotnet/aspnet. The worker serves
+#     no HTTP, so it ships no web stack.
+#   * No curl and no HEALTHCHECK. A background worker has nothing to poll;
+#     liveness is the periodic queue-health log line it emits, and its absence
+#     is the alert (see QueueHealthService).
+#   * No EXPOSE. There is no port, which is the simplest possible way to
+#     satisfy "do not expose worker management endpoints publicly".
+# =============================================================================
+
+# -- Build --------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+WORKDIR /src
+
+COPY Directory.Build.props Directory.Packages.props LeaseReminder.sln ./
+COPY src/LeaseReminder.Domain/LeaseReminder.Domain.csproj src/LeaseReminder.Domain/
+COPY src/LeaseReminder.Application/LeaseReminder.Application.csproj src/LeaseReminder.Application/
+COPY src/LeaseReminder.Infrastructure/LeaseReminder.Infrastructure.csproj src/LeaseReminder.Infrastructure/
+COPY src/LeaseReminder.Api/LeaseReminder.Api.csproj src/LeaseReminder.Api/
+COPY src/LeaseReminder.Worker/LeaseReminder.Worker.csproj src/LeaseReminder.Worker/
+COPY tests/Directory.Build.props tests/
+COPY tests/LeaseReminder.UnitTests/LeaseReminder.UnitTests.csproj tests/LeaseReminder.UnitTests/
+COPY tests/LeaseReminder.IntegrationTests/LeaseReminder.IntegrationTests.csproj tests/LeaseReminder.IntegrationTests/
+
+RUN dotnet restore src/LeaseReminder.Worker/LeaseReminder.Worker.csproj
+
+COPY src/ src/
+
+RUN dotnet publish src/LeaseReminder.Worker/LeaseReminder.Worker.csproj \
+      --no-restore \
+      --configuration Release \
+      --output /app/publish \
+      /p:UseAppHost=false
+
+# -- Runtime ------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+
+RUN groupadd --system --gid 64002 leasereminder \
+    && useradd --system --uid 64002 --gid 64002 --no-create-home --shell /usr/sbin/nologin leasereminder
+
+WORKDIR /app
+
+# Read-only application files (section 4.H asks for read-only filesystems
+# where practical). The worker writes nothing to disk: documents go to
+# Supabase Storage, never to the container filesystem, which on Render is not
+# durable anyway (section 8).
+COPY --from=build --chown=root:root --chmod=555 /app/publish ./
+
+ENV DOTNET_ENVIRONMENT=Production \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+USER 64002:64002
+
+# PID 1, so SIGTERM reaches the host directly and the 30 second graceful
+# shutdown window actually applies. Without this a redeploy would kill the
+# process mid-send; the claim lock and idempotency key make that safe, but it
+# is still an avoidable delay.
+ENTRYPOINT ["dotnet", "LeaseReminder.Worker.dll"]

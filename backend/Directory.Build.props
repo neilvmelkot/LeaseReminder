@@ -1,0 +1,46 @@
+<Project>
+
+  <!--
+    Settings shared by every project in the solution.
+
+    .NET 10 is the current LTS release. Section 2 of the specification asks for
+    "the latest supported LTS release" and notes that .NET 8 should be checked
+    against its support lifecycle before starting new production work; .NET 8
+    reaches end of support in November 2026, so a project starting now targets
+    .NET 10.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!--
+      Warnings are errors. The nullable reference warnings in particular are
+      the cheapest available defence against a null slipping into a date
+      calculation or an authorization check.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Deterministic, source-linked builds so a deployed binary is traceable. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Central package version management; versions live in Directory.Packages.props. -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!-- Fail the build if a transitive dependency has a known vulnerability. -->
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+</Project>

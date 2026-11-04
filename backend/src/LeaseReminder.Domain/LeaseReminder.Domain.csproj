@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Entities, enums, and the invariants that hold regardless of storage or
+    transport. Deliberately depends on nothing but NodaTime: no EF Core, no
+    ASP.NET, no HTTP. That keeps the lease rules testable in isolation.
+  -->
+  <ItemGroup>
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+</Project>

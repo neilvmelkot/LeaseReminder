@@ -1,0 +1,347 @@
+# =============================================================================
+# CI (section 4.K: dependency scanning, static analysis, secret scanning, and
+# the authorization and date-calculation tests).
+#
+# The job that matters most is `database`. It applies every migration to a
+# clean PostgreSQL and then runs both isolation suites against it. The RLS
+# policies, the column-level privileges on the Gmail token, and the CHECK
+# constraints encoding the approval gate are the real security boundary of
+# this system, and they cannot be verified by a unit test or a linter.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so a newly published advisory against an unchanged dependency is
+  # still found. A dependency audit that only runs on commit goes stale on a
+  # quiet repository.
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Migrations and the isolation suites
+  # ---------------------------------------------------------------------------
+  database:
+    name: Migrations and isolation tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: leasereminder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leasereminder"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: ci
+        run: |
+          set -euo pipefail
+          # Applied in filename order, each in its own transaction, exactly as
+          # db/migrate.sh does locally. The verification blocks inside the
+          # migrations fail the job if RLS is missing on a table or if a role
+          # has a privilege it should not.
+          for file in db/migrations/*.sql; do
+            echo "--- applying $(basename "$file")"
+            psql -v ON_ERROR_STOP=1 --quiet \
+              -h localhost -U postgres -d leasereminder -f "$file"
+          done
+
+      - name: Give the application roles a login
+        env:
+          PGPASSWORD: ci
+        run: |
+          # The migrations create these roles NOLOGIN with no password on
+          # purpose: no credential belongs in source control. CI sets a
+          # throwaway one so the tests can connect as them.
+          psql -v ON_ERROR_STOP=1 --quiet -h localhost -U postgres -d leasereminder -c \
+            "alter role app_api with login password 'ci';
+             alter role app_worker with login password 'ci';"
+
+      - name: Run the SQL isolation suite
+        env:
+          PGPASSWORD: ci
+        run: |
+          set -euo pipefail
+          # The executable form of the security acceptance tests in section 4.
+          for file in db/tests/*.sql; do
+            echo "--- running $(basename "$file")"
+            psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d leasereminder -f "$file"
+          done
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore backend/LeaseReminder.sln
+
+      - name: Run the .NET test suites against the live database
+        env:
+          # Without these the integration tests SKIP rather than fail, which
+          # would quietly remove the RLS coverage from CI while still showing
+          # a green run.
+          TEST_OWNER_DATABASE_URL: "Host=localhost;Port=5432;Database=leasereminder;Username=postgres;Password=ci;SSL Mode=Disable"
+          TEST_APP_DATABASE_URL: "Host=localhost;Port=5432;Database=leasereminder;Username=app_api;Password=ci;SSL Mode=Disable"
+        run: |
+          dotnet test backend/LeaseReminder.sln \
+            --no-restore \
+            --configuration Release \
+            --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=results.trx" \
+            --results-directory artifacts/test-results
+
+      - name: Fail if any integration test skipped
+        run: |
+          set -euo pipefail
+          # A skipped isolation test is worse than a failing one: the run looks
+          # green and nobody notices the coverage is gone.
+          skipped=$(grep -c 'outcome="NotExecuted"' artifacts/test-results/results.trx || true)
+          if [ "${skipped}" -ne 0 ]; then
+            echo "::error::${skipped} test(s) were skipped. The integration tests must run in CI."
+            exit 1
+          fi
+          echo "No tests were skipped."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: artifacts/test-results
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Build, analysers, and the dependency audit
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend build and analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # TreatWarningsAsErrors and AnalysisLevel=latest-recommended are set in
+      # Directory.Build.props, so this step IS the static analysis step; a
+      # code-quality warning fails the build.
+      - name: Build
+        env:
+          CI: "true"
+        run: dotnet build backend/LeaseReminder.sln --configuration Release
+
+      - name: Check formatting
+        run: dotnet format backend/LeaseReminder.sln --verify-no-changes
+
+      # NuGetAuditMode=all already fails the build on a known vulnerability in
+      # a direct or transitive package. This lists them explicitly so the
+      # report is readable rather than buried in build output.
+      - name: Audit dependencies
+        run: |
+          dotnet list backend/LeaseReminder.sln package --vulnerable --include-transitive
+          dotnet list backend/LeaseReminder.sln package --deprecated
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend build and analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        # npm ci, not npm install: it installs exactly the lock file and fails
+        # if package.json and the lock have drifted, which is what makes a CI
+        # build reproducible.
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      # The development Content-Security-Policy permits 'unsafe-eval', because
+      # React's development build needs it for its error overlay; production
+      # must not. The difference is a single branch on NODE_ENV, which is easy
+      # to flatten by accident and produces no visible symptom when it is, so
+      # the production policy is asserted rather than trusted.
+      - name: Verify production security headers
+        working-directory: frontend
+        run: NODE_ENV=production node scripts/verify-csp.mjs
+
+      - name: Audit dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=moderate
+
+  # ---------------------------------------------------------------------------
+  # Container images
+  #
+  # Built in CI as well as on Render, so a Dockerfile mistake is caught on the
+  # pull request rather than at deploy time.
+  # ---------------------------------------------------------------------------
+  images:
+    name: Container images
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.api
+          push: false
+          load: true
+          tags: leasereminder-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.worker
+          push: false
+          load: true
+          tags: leasereminder-worker:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build the frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          load: true
+          tags: leasereminder-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert the images do not run as root
+        run: |
+          set -euo pipefail
+          # Section 4.H. Checked rather than trusted, because a USER line is
+          # easy to drop in a refactor and nothing else would notice.
+          for image in leasereminder-api:ci leasereminder-worker:ci leasereminder-web:ci; do
+            user=$(docker image inspect --format '{{.Config.User}}' "${image}")
+            if [ -z "${user}" ] || [ "${user}" = "root" ] || [ "${user}" = "0" ]; then
+              echo "::error::${image} runs as root (User='${user}')."
+              exit 1
+            fi
+            echo "${image} runs as ${user}"
+          done
+
+      - name: Assert no SDK is present in the runtime images
+        run: |
+          set -euo pipefail
+          # A compiler in a production image is both a size problem and an
+          # attacker convenience.
+          for image in leasereminder-api:ci leasereminder-worker:ci; do
+            count=$(docker run --rm --entrypoint sh "${image}" \
+              -c 'dotnet --list-sdks 2>/dev/null | wc -l')
+            if [ "${count}" -ne 0 ]; then
+              echo "::error::${image} contains a .NET SDK."
+              exit 1
+            fi
+            echo "${image} contains no SDK"
+          done
+
+      - name: Scan the images for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: leasereminder-api:ci
+          format: table
+          severity: HIGH,CRITICAL
+          # Fails the job, because shipping a known high-severity
+          # vulnerability in a base image is not something to merge past.
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so a secret committed and later removed is still
+          # found. Removing it from the working tree does not remove it from
+          # the repository, and the credential still needs rotating.
+          fetch-depth: 0
+
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert no .env file is committed
+        run: |
+          set -euo pipefail
+          # .gitignore covers this, but .gitignore can be bypassed with
+          # git add -f and the mistake is expensive.
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is committed. Remove it and rotate every credential in it."
+            exit 1
+          fi
+          tracked=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' || true)
+          if [ -n "${tracked}" ]; then
+            echo "::error::environment files are committed: ${tracked}"
+            exit 1
+          fi
+          echo "No environment files are committed."

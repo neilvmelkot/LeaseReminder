@@ -1,0 +1,17 @@
+**/.git
+**/.github
+**/node_modules
+**/bin
+**/obj
+**/.next
+**/out
+**/TestResults
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+**/*.md
+!README.md
+**/.vs
+**/.idea
+docs/

@@ -1,0 +1,220 @@
+# =============================================================================
+# Render blueprint (section 8).
+#
+# Three services, deployed separately:
+#   leasereminder-api      ASP.NET Core Web Service, Docker
+#   leasereminder-worker   .NET Background Worker, Docker
+#   leasereminder-web      Next.js Web Service, Docker
+#
+# PostgreSQL and object storage are Supabase, not Render, so there is no
+# database block here. Uploaded lease documents are NEVER written to a Render
+# container filesystem: it is not durable, and a redeploy would lose them.
+#
+# Every secret below is declared with sync: false, which means Render prompts
+# for it once and stores it encrypted. No secret value appears in this file,
+# and this file is committed (section 4.J).
+#
+# Before the first deploy, read docs/deployment.md: the database roles need
+# passwords set, the migrations have to be applied, and the Google OAuth client
+# needs its redirect URI registered.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: leasereminder-api
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile.api
+    dockerContext: ./backend
+    # Liveness, not readiness. Render restarts an instance that fails this, so
+    # it must not depend on the database: a brief Supabase blip should not
+    # cause a restart storm that turns a short outage into a long one.
+    healthCheckPath: /health/live
+    autoDeployTrigger: commit
+
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+
+      # Render supplies PORT; ASPNETCORE_URLS has to agree with it.
+      - key: ASPNETCORE_URLS
+        value: http://+:8080
+      - key: PORT
+        value: 8080
+
+      # --- Database ---------------------------------------------------------
+      # Connects as app_api: a least-privilege role with RLS enforced, no
+      # BYPASSRLS, and no privilege on the Gmail token columns. Using the
+      # Supabase postgres role here would silently disable every RLS policy,
+      # which NpgsqlDataSourceFactory refuses at startup.
+      - key: Database__ConnectionString
+        sync: false
+
+      # --- Authentication ---------------------------------------------------
+      - key: Jwt__Issuer
+        sync: false
+      - key: Jwt__Audience
+        value: authenticated
+
+      # --- CORS -------------------------------------------------------------
+      # Exact origin of the frontend. A wildcard is rejected at startup.
+      - key: Cors__AllowedOrigins__0
+        fromService:
+          name: leasereminder-web
+          type: web
+          property: host
+
+      # --- Document storage -------------------------------------------------
+      # The API needs these to store an upload and to mint short-lived signed
+      # URLs for the review screen's viewer. It does NOT call the extraction
+      # model: that is the worker's job.
+      - key: Storage__Supabase__ProjectUrl
+        sync: false
+      # Server-side only. Must never be given to the frontend, and must never
+      # be prefixed NEXT_PUBLIC_ (section 4.B). It bypasses Row Level
+      # Security, which is why it stays on the server.
+      - key: Storage__Supabase__ServiceRoleKey
+        sync: false
+      - key: Storage__Supabase__Bucket
+        value: lease-documents
+      # Five minutes. A signed URL is a bearer credential for one object, so
+      # its value decays quickly on purpose.
+      - key: Storage__Supabase__SignedUrlLifetimeSeconds
+        value: "300"
+
+      # --- Token encryption (phase 4) ---------------------------------------
+      # 32 raw bytes, base64. Generate with: openssl rand -base64 32
+      # Kept out of the database on purpose, so a database backup is not a set
+      # of working Gmail credentials (section 4.E).
+      - key: TokenEncryption__Keys
+        sync: false
+      - key: TokenEncryption__CurrentKeyVersion
+        value: "1"
+
+      # --- Google OAuth, for connecting a Gmail mailbox ---------------------
+      # A SEPARATE OAuth client from development (section 4.J): two minutes of
+      # work, and a leaked development secret then cannot send mail from the
+      # real account.
+      - key: Google__ClientId
+        sync: false
+      - key: Google__ClientSecret
+        sync: false
+      # Must match a redirect URI registered on the OAuth client EXACTLY.
+      # Google compares it as a string, so a mismatch gives you
+      # redirect_uri_mismatch rather than anything more helpful.
+      #   https://<your-api>.onrender.com/api/v1/integrations/google/callback
+      - key: Google__RedirectUri
+        sync: false
+      # Where the browser lands once consent finishes. The FRONTEND, not the
+      # API: the user started on a settings page and should end up back on it.
+      #   https://<your-web>.onrender.com/settings/email
+      - key: Google__CompletionUrl
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Background worker
+  #
+  # A separate service, not a thread inside the API, for two reasons that both
+  # matter: it connects as a strictly narrower database role, and a wedged
+  # document parse or a slow provider call cannot make the UI unresponsive.
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: leasereminder-worker
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile.worker
+    dockerContext: ./backend
+    autoDeployTrigger: commit
+
+    envVars:
+      - key: DOTNET_ENVIRONMENT
+        value: Production
+
+      # Connects as app_worker, which holds NO table privileges at all and can
+      # only EXECUTE the reviewed functions in db/migrations/0007. A migration
+      # assertion fails the deployment if a table grant is ever added to it.
+      - key: Database__ConnectionString
+        sync: false
+
+      - key: Worker__PollIntervalSeconds
+        value: "30"
+      - key: Worker__DispatchBatchSize
+        value: "20"
+      - key: Worker__MaxConcurrency
+        value: "4"
+
+      # Shared with the API, because the worker decrypts what the API encrypted.
+      - key: TokenEncryption__Keys
+        sync: false
+      - key: TokenEncryption__CurrentKeyVersion
+        value: "1"
+
+      # --- Document storage -------------------------------------------------
+      - key: Storage__Supabase__ProjectUrl
+        sync: false
+      - key: Storage__Supabase__ServiceRoleKey
+        sync: false
+      - key: Storage__Supabase__Bucket
+        value: lease-documents
+
+      # --- Document extraction ----------------------------------------------
+      # A Google AI Studio API key. Leave it unset and extraction is simply
+      # switched off: documents still upload and store, and their terms are
+      # entered by hand. That is a supported state, not a broken one.
+      - key: Documents__Gemini__ApiKey
+        sync: false
+      # Configurable because free-tier model availability changes, and that is
+      # not a reason to redeploy.
+      - key: Documents__Gemini__Model
+        value: gemini-2.5-flash
+
+      # --- Google OAuth -----------------------------------------------------
+      # The worker does not run the consent flow, but it does exchange the
+      # stored refresh token for an access token before every send, and that
+      # exchange is authenticated with the client id and secret.
+      - key: Google__ClientId
+        sync: false
+      - key: Google__ClientSecret
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  #
+  # A Web Service rather than a Static Site: the app uses server components and
+  # route handlers, so it needs a Node runtime (section 8).
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: leasereminder-web
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+
+      # NEXT_PUBLIC_ values are compiled into the browser bundle, so ONLY
+      # non-secret values may carry that prefix. The anon key is designed to be
+      # public and is useless without a valid session; the service-role key is
+      # not here and must never be.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          name: leasereminder-api
+          type: web
+          property: host

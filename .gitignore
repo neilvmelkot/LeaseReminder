@@ -1,0 +1,47 @@
+# --- Secrets: never commit ---
+.env
+.env.*
+# The example files are placeholders only and MUST be committed: they are the
+# documentation of what has to be configured. Everything else matching .env.*
+# is a real credential and must not be.
+!.env.example
+!.env.worker.example
+*.pem
+*.pfx
+*.key
+secrets/
+
+# --- .NET ---
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+TestResults/
+coverage/
+*.trx
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Tooling ---
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Local scratch ---
+tmp/
+scratch/
+# Generated single-use bundle of pending migrations for the Supabase SQL
+# editor. Regenerate with db/make-supabase-paste.mjs; never commit it.
+db/apply-to-supabase.sql

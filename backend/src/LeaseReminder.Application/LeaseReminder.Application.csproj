@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Use cases and the pure calculation engines: rent recurrence, notification
+    instants, idempotency keys, template rendering. Infrastructure is reached
+    only through the interfaces declared here, so every engine in this project
+    is unit-testable without a database.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\LeaseReminder.Domain\LeaseReminder.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+</Project>
